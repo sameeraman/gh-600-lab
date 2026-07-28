@@ -78,7 +78,36 @@ jobs:
     needs: [build-and-test, security-scan]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v6
-      - name: Deploy (placeholder)
-        run: echo "Deploying to production..."
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Infrastructure (Bicep)
+        id: infra
+        uses: azure/arm-deploy@v2
+        with:
+          resourceGroupName: ${{ secrets.AZURE_RG }}
+          template: infra/main.bicep
+          parameters: infra/parameters.dev.json
+
+      - name: Publish API
+        run: dotnet publish src/api/TodoApi.csproj -c Release -o ./publish
+
+      - name: Deploy API to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ steps.infra.outputs.apiAppName }}
+          package: ./publish
