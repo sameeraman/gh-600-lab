@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: read
+  security-events: write
+  pull-requests: write
 
 jobs:
   build-and-test:
@@ -40,8 +42,40 @@ jobs:
       - name: Run Frontend Tests
         run: cd src/frontend && npm test
 
-  deploy:
+  # ---- Security Scanning (Domain 6: Guardrails) ----
+  security-scan:
     needs: [build-and-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp, javascript
+
+      - name: Build for CodeQL
+        run: dotnet build src/api/TodoApi.csproj
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  deploy:
+    needs: [build-and-test, security-scan]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
