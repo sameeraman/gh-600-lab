@@ -69,10 +69,29 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6
+      - name: Check dependency review support
+        id: dependency-review-support
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo_response=$(gh api "repos/${{ github.repository }}")
+
+          advanced_security_status=$(echo "$repo_response" | jq -r '.security_and_analysis.advanced_security.status // "disabled"')
+          dependency_graph_status=$(echo "$repo_response" | jq -r '.security_and_analysis.dependency_graph.status // "disabled"')
+
+          if [ "$advanced_security_status" = "enabled" ] && [ "$dependency_graph_status" = "enabled" ]; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Dependency Review
+        if: steps.dependency-review-support.outputs.supported == 'true'
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
+      - name: Dependency review unavailable
+        if: steps.dependency-review-support.outputs.supported != 'true'
+        run: echo "Skipping dependency review because Advanced Security and dependency graph are not both enabled."
 
   deploy:
     needs: [build-and-test, security-scan]
