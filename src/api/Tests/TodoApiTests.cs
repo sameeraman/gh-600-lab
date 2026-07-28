@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Http.Json;
 using TodoApi.Models;
+using Xunit;
 
 namespace TodoApi.Tests;
 
@@ -13,10 +15,17 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
 
     public TodoApiTests(WebApplicationFactory<Program> factory)
     {
-        _client = factory.WithWebApplicationBuilder(builder =>
+        var dbName = $"TestDb_{Guid.NewGuid()}";
+        _client = factory.WithWebHostBuilder(builder =>
         {
-            builder.Services.AddDbContext<TodoContext>(options =>
-                options.UseInMemoryDatabase($"TestDb_{Guid.NewGuid()}"));
+            builder.ConfigureTestServices(services =>
+            {
+                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<TodoContext>));
+                if (descriptor != null)
+                    services.Remove(descriptor);
+                services.AddDbContext<TodoContext>(options =>
+                    options.UseInMemoryDatabase(dbName));
+            });
         }).CreateClient();
     }
 
