@@ -1,0 +1,50 @@
+# ============================================================
+# Basic CI Pipeline (Starting Point)
+# This is a traditional CI pipeline WITHOUT agentic features.
+# Your exercise: Transform this into an agentic CI pipeline.
+# ============================================================
+name: Basic CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build API
+        run: dotnet build src/api/TodoApi.csproj --configuration Release
+
+      - name: Run API Tests
+        run: dotnet test src/api/Tests/TodoApi.Tests.csproj --configuration Release
+
+      - name: Install Frontend Dependencies
+        run: cd src/frontend && npm ci
+
+      - name: Run Frontend Tests
+        run: cd src/frontend && npm test
+
+  deploy:
+    needs: [build-and-test]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Deploy (placeholder)
+        run: echo "Deploying to production..."
