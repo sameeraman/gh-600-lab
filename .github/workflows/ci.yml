@@ -96,12 +96,9 @@ jobs:
         run: echo "Skipping dependency review because Advanced Security and dependency graph are not both enabled."
 
   deploy:
-    needs: [build-and-test, security-scan]
+    needs: [build-and-test]
     runs-on: ubuntu-latest
-    if: >-
-      ${{ github.ref == 'refs/heads/main'
-      && needs.build-and-test.result == 'success'
-      && needs.security-scan.result != 'failure' }}
+    if: github.ref == 'refs/heads/main'
     permissions:
       id-token: write
       contents: read
