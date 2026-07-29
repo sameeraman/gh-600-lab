@@ -13,6 +13,9 @@ on:
 
 permissions:
   contents: read
+  security-events: write
+  pull-requests: write
+  actions: read
 
 jobs:
   build-and-test:
@@ -40,11 +43,95 @@ jobs:
       - name: Run Frontend Tests
         run: cd src/frontend && npm test
 
-  deploy:
+  # ---- Security Scanning (Domain 6: Guardrails) ----
+  security-scan:
+    if: github.event.repository.private == false
     needs: [build-and-test]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v6
-      - name: Deploy (placeholder)
-        run: echo "Deploying to production..."
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp, javascript
+
+      - name: Build for CodeQL
+        run: dotnet build src/api/TodoApi.csproj
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check dependency review support
+        id: dependency-review-support
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo_response=$(gh api "repos/${{ github.repository }}")
+
+          advanced_security_status=$(echo "$repo_response" | jq -r '.security_and_analysis.advanced_security.status // "disabled"')
+          dependency_graph_status=$(echo "$repo_response" | jq -r '.security_and_analysis.dependency_graph.status // "disabled"')
+
+          if [ "$advanced_security_status" = "enabled" ] && [ "$dependency_graph_status" = "enabled" ]; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Dependency Review
+        if: steps.dependency-review-support.outputs.supported == 'true'
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+      - name: Dependency review unavailable
+        if: steps.dependency-review-support.outputs.supported != 'true'
+        run: echo "Skipping dependency review because Advanced Security and dependency graph are not both enabled."
+
+  deploy:
+    needs: [build-and-test, security-scan]
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ github.ref == 'refs/heads/main'
+      && needs.build-and-test.result == 'success'
+      && needs.security-scan.result != 'failure' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Infrastructure (Bicep)
+        id: infra
+        uses: azure/arm-deploy@v2
+        with:
+          resourceGroupName: ${{ secrets.AZURE_RG }}
+          template: infra/main.bicep
+          parameters: infra/parameters.dev.json
+
+      - name: Publish API
+        run: dotnet publish src/api/TodoApi.csproj -c Release -o ./publish
+
+      - name: Deploy API to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ steps.infra.outputs.apiAppName }}
+          package: ./publish
