@@ -102,12 +102,20 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Configure OIDC subject claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo '{"use_default":false,"include_claim_keys":["repo","ref"]}' | \
+            gh api --method PUT /repos/${{ github.repository }}/actions/oidc/customization/sub --input -
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
