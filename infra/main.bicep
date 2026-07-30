@@ -83,6 +83,9 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
 resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
   name: sqlServerName
   location: sqlLocation
+  tags: {
+    SecurityControl: 'Ignore'
+  }
   properties: {
     minimalTlsVersion: '1.2'
     publicNetworkAccess: 'Enabled'
@@ -101,6 +104,9 @@ resource sqlDb 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
   parent: sqlServer
   name: sqlDbName
   location: sqlLocation
+  tags: {
+    SecurityControl: 'Ignore'
+  }
   sku: {
     name: 'GP_S_Gen5_2'
     tier: 'GeneralPurpose'
