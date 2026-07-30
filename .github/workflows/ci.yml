@@ -138,8 +138,6 @@ jobs:
           node-version: '22'
 
       - name: Build Frontend
-        env:
-          VITE_API_URL: ${{ steps.infra.outputs.apiAppUrl }}
         run: cd src/frontend && npm ci && npm run build
 
       - name: Get SWA deployment token

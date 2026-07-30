@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using TodoApi.Models;
 using Xunit;
 
@@ -89,5 +91,33 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
 
         var deleteResponse = await _client.DeleteAsync($"/api/todo/{created!.Id}");
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Todos_AreScopedToAuthenticatedUser()
+    {
+        SetUser("user-a");
+        var todo = new TodoItem { Title = "Private Todo", UserId = "untrusted-user" };
+        var createResponse = await _client.PostAsJsonAsync("/api/todo", todo);
+        var created = await createResponse.Content.ReadFromJsonAsync<TodoItem>();
+
+        Assert.NotNull(created);
+        Assert.Equal("user-a", created.UserId);
+
+        SetUser("user-b");
+        var listResponse = await _client.GetFromJsonAsync<List<TodoItem>>("/api/todo");
+        var getResponse = await _client.GetAsync($"/api/todo/{created.Id}");
+
+        Assert.NotNull(listResponse);
+        Assert.Empty(listResponse);
+        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
+    }
+
+    private void SetUser(string userId)
+    {
+        var principal = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { userId })));
+        _client.DefaultRequestHeaders.Remove("x-ms-client-principal");
+        _client.DefaultRequestHeaders.Add("x-ms-client-principal", principal);
     }
 }
