@@ -8,6 +8,9 @@
     "location": {
       "value": "westus2"
     },
+    "sqlLocation": {
+      "value": "westus3"
+    },
     "sqlAdminObjectId": {
       "value": "84b39324-0e32-4d8d-805c-965e98736387"
     },

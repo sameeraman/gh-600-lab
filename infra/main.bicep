@@ -9,6 +9,9 @@ param environment string = 'dev'
 @description('Azure region')
 param location string = resourceGroup().location
 
+@description('Region for SQL (separate: some regions block new SQL server creation)')
+param sqlLocation string = location
+
 @description('Unique suffix for resource names')
 param uniqueSuffix string = uniqueString(resourceGroup().id)
 
@@ -79,7 +82,7 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
 
 resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
   name: sqlServerName
-  location: location
+  location: sqlLocation
   properties: {
     minimalTlsVersion: '1.2'
     publicNetworkAccess: 'Enabled'
@@ -97,7 +100,7 @@ resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
 resource sqlDb 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
   parent: sqlServer
   name: sqlDbName
-  location: location
+  location: sqlLocation
   sku: {
     name: 'GP_S_Gen5_2'
     tier: 'GeneralPurpose'
