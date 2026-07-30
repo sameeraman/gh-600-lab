@@ -24,7 +24,7 @@ param sqlAdminLogin string
 var appServicePlanName = 'asp-todo-${environment}-${uniqueSuffix}'
 var apiAppName = 'app-todo-api-${environment}-${uniqueSuffix}'
 var staticWebAppName = 'swa-todo-${environment}-${uniqueSuffix}'
-var sqlServerName = 'sql-gh600-${uniqueSuffix}'
+var sqlServerName = 'sql1-gh600-${uniqueSuffix}'
 var sqlDbName = 'tododb'
 
 // App Service Plan
