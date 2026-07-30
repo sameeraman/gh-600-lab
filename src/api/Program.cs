@@ -6,19 +6,26 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddDbContext<TodoContext>(opt => opt.UseInMemoryDatabase("TodoList"));
-builder.Services.AddScoped<ITodoService, TodoService>();
-builder.Services.AddCors(options =>
+var connectionString = builder.Configuration.GetConnectionString("TodoDb");
+
+builder.Services.AddDbContext<TodoContext>(options =>
 {
-    options.AddPolicy("AllowFrontend", policy =>
-        policy.WithOrigins("http://localhost:3000")
-              .AllowAnyHeader()
-              .AllowAnyMethod());
+    if (string.IsNullOrWhiteSpace(connectionString))
+        options.UseInMemoryDatabase("TodoList");
+    else
+        options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure());
 });
+builder.Services.AddScoped<ITodoService, TodoService>();
 
 var app = builder.Build();
 
-app.UseCors("AllowFrontend");
+if (!string.IsNullOrWhiteSpace(connectionString))
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<TodoContext>();
+    db.Database.Migrate();
+}
+
 app.MapControllers();
 app.Run();
 

@@ -7,8 +7,16 @@ function App() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
+  const [user, setUser] = useState(null);
 
   useEffect(() => { fetchTodos(); }, []);
+
+  useEffect(() => {
+    fetch('/.auth/me')
+      .then(res => res.json())
+      .then(data => setUser(data.clientPrincipal))
+      .catch(() => setUser(null));
+  }, []);
 
   async function fetchTodos() {
     try {
@@ -50,6 +58,12 @@ function App() {
   return (
     <div style={{ maxWidth: '600px', margin: '2rem auto', fontFamily: 'system-ui' }}>
       <h1>📋 Todo App</h1>
+      {user && (
+        <p style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Signed in as <strong>{user.userDetails}</strong></span>
+          <a href="/logout">Sign out</a>
+        </p>
+      )}
       {error && <p style={{ color: 'red' }} role="alert">{error}</p>}
       <form onSubmit={addTodo} style={{ marginBottom: '2rem' }}>
         <input
