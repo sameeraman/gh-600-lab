@@ -144,6 +144,11 @@ jobs:
         with:
           path: reports/
 
+      - name: Normalize Reports Directory Permissions
+        run: |
+          mkdir -p reports
+          chmod -R u+rwX reports
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -155,9 +160,9 @@ jobs:
         env:
           COPILOT_GITHUB_TOKEN: ${{ github.token }}
         run: |
-          copilot -p "Consolidate the review, audit, and security reports in ./reports/ into a single executive summary. Include: overall risk level, blocking issues, advisory items, and a merge recommendation." \
+          copilot -p "Read the report files already present under ./reports/ and return only a concise markdown executive summary for the pull request comment. Do not create files. Do not run shell commands. The workflow will save your stdout to reports/executive-summary.md. Include: overall risk level, blocking issues, advisory items, and a merge recommendation." \
             --allow-tool='read,search' \
-            --no-ask-user > consolidated-summary.md
+            --no-ask-user > reports/executive-summary.md
 
       - name: Post Summary to PR
         if: github.event_name == 'pull_request'
@@ -165,7 +170,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const summary = fs.readFileSync('consolidated-summary.md', 'utf8');
+            const summary = fs.readFileSync('reports/executive-summary.md', 'utf8');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -178,5 +183,5 @@ jobs:
           {
             echo "## 🤖 Agentic CI Consolidated Report"
             echo ""
-            cat consolidated-summary.md
+            cat reports/executive-summary.md
           } >> "$GITHUB_STEP_SUMMARY"
