@@ -10,8 +10,6 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 var connectionString = builder.Configuration.GetConnectionString("TodoDb");
-var tenantId = builder.Configuration["Authentication:TenantId"] ?? "common";
-var clientId = builder.Configuration["Authentication:ClientId"];
 
 builder.Services
     .AddAuthentication(options =>
@@ -23,6 +21,7 @@ builder.Services
     {
         options.ForwardDefaultSelector = context =>
         {
+#if DEBUG
             var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
             var environment = context.RequestServices.GetRequiredService<IHostEnvironment>();
             var requireSignedTokens = configuration.GetValue("Authentication:RequireSignedTokens", true);
@@ -30,14 +29,23 @@ builder.Services
             return environment.IsDevelopment() && !requireSignedTokens
                 ? LocalDevelopmentAuthenticationHandler.SchemeName
                 : JwtBearerDefaults.AuthenticationScheme;
+#else
+            return JwtBearerDefaults.AuthenticationScheme;
+#endif
         };
     })
-    .AddJwtBearer(options =>
+    .AddJwtBearer();
+
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IConfiguration>((options, configuration) =>
     {
+        var tenantId = configuration["Authentication:TenantId"] ?? "common";
+        var clientId = configuration["Authentication:ClientId"];
+
         options.Authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateAudience = !string.IsNullOrWhiteSpace(clientId),
+            ValidateAudience = true,
             ValidAudience = clientId,
             NameClaimType = "name"
         };
@@ -50,10 +58,15 @@ builder.Services
                 return Task.CompletedTask;
             }
         };
-    })
+    });
+
+#if DEBUG
+builder.Services.AddAuthentication()
     .AddScheme<AuthenticationSchemeOptions, LocalDevelopmentAuthenticationHandler>(
         LocalDevelopmentAuthenticationHandler.SchemeName,
         _ => { });
+#endif
+
 builder.Services.AddAuthorization();
 
 builder.Services.AddDbContext<TodoContext>(options =>
@@ -66,6 +79,18 @@ builder.Services.AddDbContext<TodoContext>(options =>
 builder.Services.AddScoped<ITodoService, TodoService>();
 
 var app = builder.Build();
+
+#if DEBUG
+var allowLocalDevelopmentAuthentication = app.Environment.IsDevelopment()
+    && !app.Configuration.GetValue("Authentication:RequireSignedTokens", true);
+#else
+const bool allowLocalDevelopmentAuthentication = false;
+#endif
+
+if (!allowLocalDevelopmentAuthentication && string.IsNullOrWhiteSpace(app.Configuration["Authentication:ClientId"]))
+{
+    throw new InvalidOperationException("Authentication:ClientId must be configured when signed tokens are required.");
+}
 
 if (!string.IsNullOrWhiteSpace(connectionString))
 {

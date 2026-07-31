@@ -122,7 +122,7 @@ jobs:
         with:
           resourceGroupName: ${{ secrets.AZURE_RG }}
           template: infra/main.bicep
-          parameters: infra/parameters.dev.json
+          parameters: infra/parameters.dev.json authenticationClientId=${{ secrets.AZURE_AUTH_CLIENT_ID }}
 
       - name: Publish API
         run: dotnet publish src/api/TodoApi.csproj -c Release -o ./publish

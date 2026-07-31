@@ -1,6 +1,7 @@
+#if DEBUG
 using System.Security.Claims;
-using System.Text.Encodings.Web;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
@@ -10,7 +11,6 @@ namespace TodoApi.Services;
 public sealed class LocalDevelopmentAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
     public const string SchemeName = "LocalDevelopment";
-    private const string DevUserId = "local-dev-user";
 
     public LocalDevelopmentAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -22,7 +22,12 @@ public sealed class LocalDevelopmentAuthenticationHandler : AuthenticationHandle
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var userId = TryGetUserIdFromPrincipalHeader(Request.Headers["x-ms-client-principal"].FirstOrDefault()) ?? DevUserId;
+        var userId = TryGetUserIdFromPrincipalHeader(Request.Headers["x-ms-client-principal"].FirstOrDefault());
+        if (userId is null)
+        {
+            return Task.FromResult(AuthenticateResult.Fail("A valid x-ms-client-principal header is required for local development authentication."));
+        }
+
         var claims = new[]
         {
             new Claim("oid", userId),
@@ -54,3 +59,4 @@ public sealed class LocalDevelopmentAuthenticationHandler : AuthenticationHandle
         }
     }
 }
+#endif

@@ -115,9 +115,14 @@ jobs:
           ASPNETCORE_URLS: http://localhost:5000
           Authentication__RequireSignedTokens: 'false'
         run: |
+          principal_header=$(python - <<'PY'
+          import base64, json
+          print(base64.b64encode(json.dumps({"userId": "local-dev-user"}).encode()).decode())
+          PY
+          )
           dotnet run --project src/api/TodoApi.csproj > /tmp/todo-api.log 2>&1 &
           for attempt in {1..30}; do
-            if curl --silent --fail http://localhost:5000/api/todo > /dev/null; then
+            if curl --silent --fail -H "x-ms-client-principal: $principal_header" http://localhost:5000/api/todo > /dev/null; then
               exit 0
             fi
             sleep 1

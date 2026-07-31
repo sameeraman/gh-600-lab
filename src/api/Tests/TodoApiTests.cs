@@ -139,14 +139,14 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task NonDevelopmentApi_ReturnsUnauthorized_WhenSignedTokenRequirementIsUnset()
+    public void NonDevelopmentApi_Throws_WhenAuthenticationClientIdIsMissing()
     {
-        using var client = CreateClient(environmentName: "Production");
-        SetUser(client, "user-a");
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+        {
+            using var _ = CreateClient(environmentName: "Production");
+        });
 
-        var response = await client.GetAsync("/api/todo");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("Authentication:ClientId", exception.Message);
     }
 
     [Fact]
@@ -160,17 +160,58 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Fact]
+    public async Task DevelopmentApi_ReturnsUnauthorized_WhenUnsignedClientPrincipalHeaderIsMissing()
+    {
+        using var client = CreateClient(environmentName: "Development", requireSignedTokens: false);
+
+        var response = await client.GetAsync("/api/todo");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DevelopmentApi_ReturnsUnauthorized_WhenUnsignedClientPrincipalHeaderIsMalformed()
+    {
+        using var client = CreateClient(environmentName: "Development", requireSignedTokens: false);
+        client.DefaultRequestHeaders.Remove("x-ms-client-principal");
+        client.DefaultRequestHeaders.Add("x-ms-client-principal", "not-base64");
+
+        var response = await client.GetAsync("/api/todo");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public void HostedApi_Throws_WhenAuthenticationClientIdIsMissing()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+        {
+            using var _ = CreateClient(environmentName: "Production", requireSignedTokens: true);
+        });
+
+        Assert.Contains("Authentication:ClientId", exception.Message);
+    }
+
     private HttpClient CreateHostedClient()
     {
-        return CreateClient(environmentName: "Production", requireSignedTokens: true);
+        return CreateClient(
+            environmentName: "Production",
+            requireSignedTokens: true,
+            clientId: "11111111-1111-1111-1111-111111111111");
     }
 
     private HttpClient CreateDevelopmentClient()
     {
-        return CreateClient(environmentName: "Development", requireSignedTokens: false);
+        var client = CreateClient(environmentName: "Development", requireSignedTokens: false);
+        SetUser(client, "local-dev-user");
+        return client;
     }
 
-    private HttpClient CreateClient(string environmentName = "Development", bool? requireSignedTokens = null)
+    private HttpClient CreateClient(
+        string environmentName = "Development",
+        bool? requireSignedTokens = null,
+        string? clientId = null)
     {
         var dbName = $"TestDb_{Guid.NewGuid()}";
         return _factory.WithWebHostBuilder(builder =>
@@ -183,7 +224,8 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["Authentication:RequireSignedTokens"] = requireSignedTokens.Value.ToString(),
-                        ["Authentication:TenantId"] = "common"
+                        ["Authentication:TenantId"] = "common",
+                        ["Authentication:ClientId"] = clientId
                     });
                 }
             });
