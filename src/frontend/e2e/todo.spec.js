@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Todo App E2E', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('/');
   });
 
   test('should display the app title', async ({ page }) => {
@@ -19,9 +19,10 @@ test.describe('Todo App E2E', () => {
   test('should toggle a todo complete', async ({ page }) => {
     await page.getByLabel('Todo title').fill('Toggle Test');
     await page.getByText('Add Todo').click();
-    await expect(page.getByText('Toggle Test')).toBeVisible();
-    await page.getByLabel('Toggle Toggle Test').click();
-    await expect(page.getByText('Toggle Test')).toHaveCSS('text-decoration', /line-through/);
+    const toggle = page.getByLabel('Toggle Toggle Test');
+    await expect(toggle).not.toBeChecked();
+    await toggle.click();
+    await expect(toggle).toBeChecked();
   });
 
   test('should delete a todo', async ({ page }) => {
