@@ -41,7 +41,6 @@ jobs:
       - name: Run API Tests
         run: |
           dotnet test src/api/Tests/TodoApi.Tests.csproj \
-            --configuration Release \
             --logger "trx;LogFileName=api-results.trx" \
             --results-directory ./test-results
 
