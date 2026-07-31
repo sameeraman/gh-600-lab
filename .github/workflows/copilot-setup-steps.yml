@@ -1,0 +1,32 @@
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # Job name must be exactly this — Copilot discovers the job by name.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Restore API dependencies
+        run: dotnet restore src/api/TodoApi.csproj
+
+      - name: Install frontend dependencies
+        run: cd src/frontend && npm ci
+
+      - name: Install Playwright browsers
+        run: cd src/frontend && npx playwright install --with-deps chromium

@@ -21,6 +21,9 @@ param sqlAdminObjectId string
 @description('Entra login name (UPN or app name) for the SQL AAD admin')
 param sqlAdminLogin string
 
+@description('Microsoft Entra application (client) ID that the API must accept in token audiences')
+param authenticationClientId string
+
 var appServicePlanName = 'asp-todo-${environment}-${uniqueSuffix}'
 var apiAppName = 'app-todo-api-${environment}-${uniqueSuffix}'
 var staticWebAppName = 'swa-todo-${environment}-${uniqueSuffix}'
@@ -55,6 +58,18 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'ASPNETCORE_ENVIRONMENT'
           value: environment == 'prod' ? 'Production' : 'Development'
+        }
+        {
+          name: 'Authentication__RequireSignedTokens'
+          value: 'true'
+        }
+        {
+          name: 'Authentication__TenantId'
+          value: subscription().tenantId
+        }
+        {
+          name: 'Authentication__ClientId'
+          value: authenticationClientId
         }
         {
           name: 'ConnectionStrings__TodoDb'
