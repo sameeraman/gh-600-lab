@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "local",
+      "command": "npx",
+      "args": ["-y", "@github/mcp-server"],
+      "tools": ["*"]
+    },
+    "playwright": {
+      "type": "local",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp-server"],
+      "tools": ["browser_navigate", "browser_click", "browser_snapshot"],
+      "env": {
+        "PLAYWRIGHT_HEADLESS": "true"
+      }
+    }
+  }
+}
