@@ -57,6 +57,14 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
           value: environment == 'prod' ? 'Production' : 'Development'
         }
         {
+          name: 'Authentication__RequireSignedTokens'
+          value: 'true'
+        }
+        {
+          name: 'Authentication__TenantId'
+          value: subscription().tenantId
+        }
+        {
           name: 'ConnectionStrings__TodoDb'
           value: 'Server=tcp:${sqlServer.properties.fullyQualifiedDomainName},1433;Initial Catalog=${sqlDbName};Authentication=Active Directory Default;Encrypt=True;TrustServerCertificate=False;Connection Timeout=60;'
         }

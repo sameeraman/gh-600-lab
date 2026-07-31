@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
@@ -13,22 +14,13 @@ namespace TodoApi.Tests;
 
 public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
 {
+    private readonly WebApplicationFactory<Program> _factory;
     private readonly HttpClient _client;
 
     public TodoApiTests(WebApplicationFactory<Program> factory)
     {
-        var dbName = $"TestDb_{Guid.NewGuid()}";
-        _client = factory.WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureTestServices(services =>
-            {
-                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<TodoContext>));
-                if (descriptor != null)
-                    services.Remove(descriptor);
-                services.AddDbContext<TodoContext>(options =>
-                    options.UseInMemoryDatabase(dbName));
-            });
-        }).CreateClient();
+        _factory = factory;
+        _client = CreateClient();
     }
 
     [Fact]
@@ -113,11 +105,76 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task HostedApi_ReturnsUnauthorized_WhenAuthenticationHeadersAreMissing()
+    {
+        using var client = CreateClient(requireSignedTokens: true);
+
+        var response = await client.GetAsync("/api/todo");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task HostedApi_ReturnsUnauthorized_WhenOnlyUnsignedClientPrincipalHeaderIsPresent()
+    {
+        using var client = CreateClient(requireSignedTokens: true);
+        SetUser(client, "user-a");
+
+        var response = await client.GetAsync("/api/todo");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task HostedApi_ReturnsUnauthorized_WhenSignedTokenHeaderIsMalformed()
+    {
+        using var client = CreateClient(requireSignedTokens: true);
+        client.DefaultRequestHeaders.Add("x-ms-token-aad-id-token", "not-a-jwt");
+
+        var response = await client.GetAsync("/api/todo");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    private HttpClient CreateClient(bool requireSignedTokens = false)
+    {
+        var dbName = $"TestDb_{Guid.NewGuid()}";
+        return _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                if (requireSignedTokens)
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Authentication:RequireSignedTokens"] = "true",
+                        ["Authentication:TenantId"] = "common"
+                    });
+                }
+            });
+
+            builder.ConfigureTestServices(services =>
+            {
+                var descriptor = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<TodoContext>));
+                if (descriptor != null)
+                    services.Remove(descriptor);
+                services.AddDbContext<TodoContext>(options =>
+                    options.UseInMemoryDatabase(dbName));
+            });
+        }).CreateClient();
+    }
+
     private void SetUser(string userId)
+    {
+        SetUser(_client, userId);
+    }
+
+    private static void SetUser(HttpClient client, string userId)
     {
         var principal = Convert.ToBase64String(
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { userId })));
-        _client.DefaultRequestHeaders.Remove("x-ms-client-principal");
-        _client.DefaultRequestHeaders.Add("x-ms-client-principal", principal);
+        client.DefaultRequestHeaders.Remove("x-ms-client-principal");
+        client.DefaultRequestHeaders.Add("x-ms-client-principal", principal);
     }
 }
