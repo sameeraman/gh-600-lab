@@ -35,7 +35,7 @@ jobs:
         run: dotnet build src/api/TodoApi.csproj --configuration Release
 
       - name: Run API Tests
-        run: dotnet test src/api/Tests/TodoApi.Tests.csproj --configuration Release
+        run: dotnet test src/api/Tests/TodoApi.Tests.csproj
 
       - name: Install Frontend Dependencies
         run: cd src/frontend && npm ci
