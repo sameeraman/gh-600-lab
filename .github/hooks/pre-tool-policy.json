@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "matcher": "bash|powershell",
+        "bash": ".github/hooks/scripts/pre-tool-policy.sh",
+        "timeoutSec": 30
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "matcher": "edit|create",
+        "bash": ".github/hooks/scripts/post-edit-check.sh",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}
