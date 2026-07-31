@@ -110,9 +110,20 @@ jobs:
           node-version: '22'
 
       - name: Start API
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://localhost:5000
+          Authentication__RequireSignedTokens: 'false'
         run: |
-          dotnet run --project src/api/TodoApi.csproj &
-          sleep 5
+          dotnet run --project src/api/TodoApi.csproj > /tmp/todo-api.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl --silent --fail http://localhost:5000/api/todo > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/todo-api.log
+          exit 1
 
       - name: Install Frontend & Playwright
         run: |
