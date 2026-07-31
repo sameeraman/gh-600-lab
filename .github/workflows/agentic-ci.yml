@@ -79,7 +79,7 @@ jobs:
 
       - name: Run ${{ matrix.agent }} Agent
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ github.token }}
         run: |
           copilot --agent=${{ matrix.agent }} \
             -p "Analyze the changes in this PR. Focus on your specialization area. Report findings with severity and file paths." \
@@ -151,7 +151,7 @@ jobs:
 
       - name: AI-Consolidated Summary
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ github.token }}
         run: |
           copilot -p "Consolidate the review, audit, and security reports in ./reports/ into a single executive summary. Include: overall risk level, blocking issues, advisory items, and a merge recommendation." \
             --allow-tool='read,search' \
