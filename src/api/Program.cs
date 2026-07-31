@@ -22,9 +22,15 @@ builder.Services
     .AddPolicyScheme("AppAuthentication", "App authentication", options =>
     {
         options.ForwardDefaultSelector = context =>
-            context.RequestServices.GetRequiredService<IConfiguration>().GetValue<bool>("Authentication:RequireSignedTokens")
-                ? JwtBearerDefaults.AuthenticationScheme
-                : LocalDevelopmentAuthenticationHandler.SchemeName;
+        {
+            var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
+            var environment = context.RequestServices.GetRequiredService<IHostEnvironment>();
+            var requireSignedTokens = configuration.GetValue("Authentication:RequireSignedTokens", true);
+
+            return environment.IsDevelopment() && !requireSignedTokens
+                ? LocalDevelopmentAuthenticationHandler.SchemeName
+                : JwtBearerDefaults.AuthenticationScheme;
+        };
     })
     .AddJwtBearer(options =>
     {

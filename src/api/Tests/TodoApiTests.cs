@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,7 +21,7 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
     public TodoApiTests(WebApplicationFactory<Program> factory)
     {
         _factory = factory;
-        _client = CreateClient();
+        _client = CreateDevelopmentClient();
     }
 
     [Fact]
@@ -108,7 +109,7 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task HostedApi_ReturnsUnauthorized_WhenAuthenticationHeadersAreMissing()
     {
-        using var client = CreateClient(requireSignedTokens: true);
+        using var client = CreateHostedClient();
 
         var response = await client.GetAsync("/api/todo");
 
@@ -118,7 +119,7 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task HostedApi_ReturnsUnauthorized_WhenOnlyUnsignedClientPrincipalHeaderIsPresent()
     {
-        using var client = CreateClient(requireSignedTokens: true);
+        using var client = CreateHostedClient();
         SetUser(client, "user-a");
 
         var response = await client.GetAsync("/api/todo");
@@ -129,7 +130,7 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task HostedApi_ReturnsUnauthorized_WhenSignedTokenHeaderIsMalformed()
     {
-        using var client = CreateClient(requireSignedTokens: true);
+        using var client = CreateHostedClient();
         client.DefaultRequestHeaders.Add("x-ms-token-aad-id-token", "not-a-jwt");
 
         var response = await client.GetAsync("/api/todo");
@@ -137,18 +138,51 @@ public class TodoApiTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    private HttpClient CreateClient(bool requireSignedTokens = false)
+    [Fact]
+    public async Task NonDevelopmentApi_ReturnsUnauthorized_WhenSignedTokenRequirementIsUnset()
+    {
+        using var client = CreateClient(environmentName: "Production");
+        SetUser(client, "user-a");
+
+        var response = await client.GetAsync("/api/todo");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DevelopmentApi_AllowsUnsignedClientPrincipalHeader_WhenSignedTokensAreDisabled()
+    {
+        using var client = CreateClient(environmentName: "Development", requireSignedTokens: false);
+        SetUser(client, "user-a");
+
+        var response = await client.GetAsync("/api/todo");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private HttpClient CreateHostedClient()
+    {
+        return CreateClient(environmentName: "Production", requireSignedTokens: true);
+    }
+
+    private HttpClient CreateDevelopmentClient()
+    {
+        return CreateClient(environmentName: "Development", requireSignedTokens: false);
+    }
+
+    private HttpClient CreateClient(string environmentName = "Development", bool? requireSignedTokens = null)
     {
         var dbName = $"TestDb_{Guid.NewGuid()}";
         return _factory.WithWebHostBuilder(builder =>
         {
+            builder.UseEnvironment(environmentName);
             builder.ConfigureAppConfiguration((_, config) =>
             {
-                if (requireSignedTokens)
+                if (requireSignedTokens is not null)
                 {
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["Authentication:RequireSignedTokens"] = "true",
+                        ["Authentication:RequireSignedTokens"] = requireSignedTokens.Value.ToString(),
                         ["Authentication:TenantId"] = "common"
                     });
                 }
