@@ -26,9 +26,18 @@ param authenticationClientId string
 
 var appServicePlanName = 'asp-todo-${environment}-${uniqueSuffix}'
 var apiAppName = 'app-todo-api-${environment}-${uniqueSuffix}'
+var apiIdentityName = 'id-todo-api-${environment}-${uniqueSuffix}'
 var staticWebAppName = 'swa-todo-${environment}-${uniqueSuffix}'
 var sqlServerName = 'sql1-gh600-${uniqueSuffix}'
 var sqlDbName = 'tododb'
+
+// User-assigned rather than system-assigned: only a user-assigned identity exposes
+// its client ID as an ARM property, which the pipeline needs to create the SQL
+// contained user by SID without Microsoft Graph directory lookups.
+resource apiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: apiIdentityName
+  location: location
+}
 
 // App Service Plan
 resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
@@ -48,7 +57,10 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
   name: apiAppName
   location: location
   identity: {
-    type: 'SystemAssigned'
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${apiIdentity.id}': {}
+    }
   }
   properties: {
     serverFarmId: appServicePlan.id
@@ -70,6 +82,11 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'Authentication__ClientId'
           value: authenticationClientId
+        }
+        {
+          // Tells DefaultAzureCredential which user-assigned identity to present to SQL.
+          name: 'AZURE_CLIENT_ID'
+          value: apiIdentity.properties.clientId
         }
         {
           name: 'ConnectionStrings__TodoDb'
@@ -156,7 +173,8 @@ resource swaLinkedBackend 'Microsoft.Web/staticSites/linkedBackends@2023-01-01' 
 // Outputs for CI/CD pipeline
 output apiAppName string = apiApp.name
 output apiAppUrl string = 'https://${apiApp.properties.defaultHostName}'
-output apiPrincipalId string = apiApp.identity.principalId
+output apiPrincipalId string = apiIdentity.properties.principalId
+output apiIdentityClientId string = apiIdentity.properties.clientId
 output sqlServerName string = sqlServer.name
 output sqlDatabaseName string = sqlDbName
 output staticWebAppName string = staticWebApp.name
