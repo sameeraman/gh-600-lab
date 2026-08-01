@@ -21,17 +21,11 @@ builder.Services
     {
         options.ForwardDefaultSelector = context =>
         {
-#if DEBUG
             var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
-            var environment = context.RequestServices.GetRequiredService<IHostEnvironment>();
-            var requireSignedTokens = configuration.GetValue("Authentication:RequireSignedTokens", true);
 
-            return environment.IsDevelopment() && !requireSignedTokens
-                ? LocalDevelopmentAuthenticationHandler.SchemeName
-                : JwtBearerDefaults.AuthenticationScheme;
-#else
-            return JwtBearerDefaults.AuthenticationScheme;
-#endif
+            return configuration.GetValue("Authentication:RequireSignedTokens", true)
+                ? JwtBearerDefaults.AuthenticationScheme
+                : ClientPrincipalAuthenticationHandler.SchemeName;
         };
     })
     .AddJwtBearer();
@@ -60,12 +54,10 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         };
     });
 
-#if DEBUG
 builder.Services.AddAuthentication()
-    .AddScheme<AuthenticationSchemeOptions, LocalDevelopmentAuthenticationHandler>(
-        LocalDevelopmentAuthenticationHandler.SchemeName,
+    .AddScheme<AuthenticationSchemeOptions, ClientPrincipalAuthenticationHandler>(
+        ClientPrincipalAuthenticationHandler.SchemeName,
         _ => { });
-#endif
 
 builder.Services.AddAuthorization();
 
@@ -80,14 +72,9 @@ builder.Services.AddScoped<ITodoService, TodoService>();
 
 var app = builder.Build();
 
-#if DEBUG
-var allowLocalDevelopmentAuthentication = app.Environment.IsDevelopment()
-    && !app.Configuration.GetValue("Authentication:RequireSignedTokens", true);
-#else
-const bool allowLocalDevelopmentAuthentication = false;
-#endif
+var requireSignedTokens = app.Configuration.GetValue("Authentication:RequireSignedTokens", true);
 
-if (!allowLocalDevelopmentAuthentication && string.IsNullOrWhiteSpace(app.Configuration["Authentication:ClientId"]))
+if (requireSignedTokens && string.IsNullOrWhiteSpace(app.Configuration["Authentication:ClientId"]))
 {
     throw new InvalidOperationException("Authentication:ClientId must be configured when signed tokens are required.");
 }

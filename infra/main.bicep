@@ -72,8 +72,10 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
           value: environment == 'prod' ? 'Production' : 'Development'
         }
         {
+          // Static Web Apps forwards identity as x-ms-client-principal, never as a bearer token,
+          // so the API trusts the header that Easy Auth validates and injects instead.
           name: 'Authentication__RequireSignedTokens'
-          value: 'true'
+          value: 'false'
         }
         {
           name: 'Authentication__TenantId'
