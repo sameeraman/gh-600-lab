@@ -21,10 +21,14 @@ function App() {
   async function fetchTodos() {
     try {
       const res = await fetch(API_URL);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch todos (${res.status} ${res.statusText})`);
+      }
       const data = await res.json();
       setTodos(data);
+      setError('');
     } catch (err) {
-      setError('Failed to fetch todos');
+      setError(err.message);
     }
   }
 
