@@ -1,9 +1,19 @@
 # ============================================================
-# Basic CI Pipeline (Starting Point)
-# This is a traditional CI pipeline WITHOUT agentic features.
-# Your exercise: Transform this into an agentic CI pipeline.
+# CI/CD Pipeline (Starting Point)
+#
+# This file holds all the AUTHORITY in the lab: what merges, what
+# deploys, and in what order. Every gate in it is deterministic, so the
+# same commit always produces the same verdict.
+#
+# There is exactly one agent in this file, in `deployment-review`, and
+# it is marked continue-on-error. It writes an opinion. It cannot fail
+# the run. That asymmetry is the whole design: agents advise,
+# deterministic checks decide.
+#
+# The rest of the agent work lives in agentic-ci.yml. Exercises 5 and 7
+# explain why the two files are kept apart.
 # ============================================================
-name: Basic CI
+name: CI
 
 on:
   pull_request:
@@ -15,6 +25,7 @@ permissions:
   contents: read
   security-events: write
   pull-requests: write
+  copilot-requests: write
   actions: read
 
 jobs:
@@ -44,8 +55,14 @@ jobs:
         run: cd src/frontend && npm test
 
   # ---- Security Scanning (Domain 6: Guardrails) ----
+  #
+  # This runs on every pull request AND on every push to main, so nothing
+  # reaches Test or Production without being scanned. deploy-test needs it.
+  #
+  # CodeQL is free on public repositories and requires GitHub Code Security
+  # on private ones. lab-preparation.md creates a public repository for this
+  # reason. If you made yours private, this job is where you will find out.
   security-scan:
-    if: github.event.repository.private == false
     needs: [build-and-test]
     runs-on: ubuntu-latest
     steps:
@@ -55,10 +72,13 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # `actions` analyses the workflow files themselves for script injection
+      # and untrusted-input issues. On a repo that hands a coding agent write
+      # access, the workflows are part of the attack surface.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: csharp, javascript
+          languages: csharp, javascript, actions
 
       - name: Build for CodeQL
         run: dotnet build src/api/TodoApi.csproj
@@ -78,10 +98,12 @@ jobs:
         run: |
           repo_response=$(gh api "repos/${{ github.repository }}")
 
+          is_private=$(echo "$repo_response" | jq -r '.private')
           advanced_security_status=$(echo "$repo_response" | jq -r '.security_and_analysis.advanced_security.status // "disabled"')
-          dependency_graph_status=$(echo "$repo_response" | jq -r '.security_and_analysis.dependency_graph.status // "disabled"')
 
-          if [ "$advanced_security_status" = "enabled" ] && [ "$dependency_graph_status" = "enabled" ]; then
+          # Dependency review is available on every public repository, and on
+          # private repositories only with GitHub Code Security.
+          if [ "$is_private" = "false" ] || [ "$advanced_security_status" = "enabled" ]; then
             echo "supported=true" >> "$GITHUB_OUTPUT"
           else
             echo "supported=false" >> "$GITHUB_OUTPUT"
@@ -93,15 +115,24 @@ jobs:
           fail-on-severity: high
       - name: Dependency review unavailable
         if: steps.dependency-review-support.outputs.supported != 'true'
-        run: echo "Skipping dependency review because Advanced Security and dependency graph are not both enabled."
+        run: echo "Skipping dependency review because this is a private repository without GitHub Code Security."
 
+  # ---- Deploy ----
+  # `environment: production` is the approval gate. That environment carries a
+  # required-reviewer rule, so this job waits for a human before it touches
+  # Azure. See lab-preparation.md.
   deploy:
-    needs: [build-and-test]
-    runs-on: ubuntu-latest
+    needs: [build-and-test, security-scan, e2e-test]
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
+    environment:
+      name: production
+      url: ${{ steps.infra.outputs.apiAppUrl }}
+    outputs:
+      api-url: ${{ steps.infra.outputs.apiAppUrl }}
     steps:
       - uses: actions/checkout@v6
 
@@ -122,10 +153,11 @@ jobs:
         with:
           resourceGroupName: ${{ secrets.AZURE_RG }}
           template: infra/main.bicep
-          parameters: infra/parameters.dev.json authenticationClientId=${{ secrets.AZURE_AUTH_CLIENT_ID }}
+          parameters: infra/parameters.json authenticationClientId=${{ secrets.AZURE_AUTH_CLIENT_ID }}
 
-      # The API authenticates to SQL with its managed identity, which only works
-      # once that identity exists as a contained user inside the database.
+      # The API connects to SQL as its managed identity, which can only
+      # authenticate once it exists as a contained user inside the database.
+      # Azure SQL exposes no ARM surface for that, so it happens over TDS.
       - name: Grant API managed identity access to SQL
         env:
           RESOURCE_GROUP: ${{ secrets.AZURE_RG }}
@@ -220,6 +252,313 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ steps.swa-token.outputs.token }}
           action: upload
-          app_location: src/frontend/dist   
-          output_location: ""              
-          skip_app_build: true
+          app_location: src/frontend/dist
+          output_location: ""
+
+  # ---- End-to-end tests (merge gate) ----
+  # Runs on every pull request, against an API hosted on the runner. No Azure,
+  # no secrets, nothing deployed. That is the point: this has to be able to
+  # block a merge, so it cannot depend on anything a pull request lacks.
+  e2e-test:
+    needs: [build-and-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Frontend Dependencies
+        run: cd src/frontend && npm ci
+
+      - name: Build Frontend
+        run: cd src/frontend && npm run build
+
+      - name: Install Playwright browser
+        run: cd src/frontend && npx playwright install --with-deps chromium
+
+      # With no ConnectionStrings__TodoDb the API uses an in-memory store and
+      # skips migrations, so the whole suite runs without a database.
+      - name: Start the API
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          Authentication__RequireSignedTokens: 'false'
+        run: |
+          set -uo pipefail
+          dotnet run --project src/api/TodoApi.csproj -c Release --urls http://127.0.0.1:5000 &
+          principal=$(printf '{"userId":"warmup"}' | base64 -w0)
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "x-ms-client-principal: ${principal}" \
+              http://127.0.0.1:5000/api/todo || true)
+            if [ "$code" = "200" ]; then
+              echo "API ready after ${i}s."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::API failed to start."
+          exit 1
+
+      # The Static Web App only signs users in interactively, which headless
+      # Playwright cannot do. The harness stands in for the SWA: it serves the
+      # built SPA and injects the same x-ms-client-principal header that the
+      # SWA's linked backend would.
+      - name: Start the test harness
+        env:
+          TEST_API_URL: http://127.0.0.1:5000
+        run: |
+          set -euo pipefail
+          node src/frontend/e2e/test-harness.mjs &
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:3000/ >/dev/null; then
+              echo "Harness ready."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Harness failed to start."
+          exit 1
+
+      - name: Run Playwright
+        working-directory: src/frontend
+        env:
+          PLAYWRIGHT_EXTERNAL_SERVER: 'true'
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+        run: npx playwright test
+
+      # One shot of the app as the suite left it, for the comment. The per-test
+      # screenshots are in the artifact; this is the one a reviewer will glance at.
+      - name: Capture the landing page
+        if: always()
+        working-directory: src/frontend
+        run: |
+          npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=1500 \
+            http://127.0.0.1:3000 landing.png
+
+      # Nobody can see the runner after the fact. Screenshots, traces and the
+      # HTML report are the only evidence this job leaves behind.
+      - name: Upload E2E evidence
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidence
+          path: |
+            src/frontend/playwright-report/
+            src/frontend/test-results/
+            src/frontend/landing.png
+          retention-days: 14
+          if-no-files-found: warn
+
+      # A comment can only display an image it can fetch over HTTP, and artifact
+      # contents have no URL. Parking the shot on a side branch gives it one.
+      # Fork pull requests get a read-only token, so they skip this.
+      - name: Publish the landing page screenshot
+        id: shot
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          test -f src/frontend/landing.png || exit 0
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          work=$(mktemp -d)
+          if ! git clone --depth 1 --branch e2e-screenshots "$remote" "$work" 2>/dev/null; then
+            git clone --depth 1 "$remote" "$work"
+            git -C "$work" checkout --orphan e2e-screenshots
+            git -C "$work" rm -rqf .
+          fi
+          mkdir -p "$work/pr-${PR}"
+          cp src/frontend/landing.png "$work/pr-${PR}/landing.png"
+          git -C "$work" add -A
+          git -C "$work" \
+            -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "E2E landing page for PR #${PR}" || true
+          git -C "$work" push -q "$remote" e2e-screenshots
+          # The file is overwritten each run, so the URL needs a cache buster.
+          echo "url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/e2e-screenshots/pr-${PR}/landing.png?v=${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      # A reviewer should not have to go hunting through Actions to find out
+      # whether the browser tests passed. Put the result where the review is.
+      - name: Comment the results on the pull request
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
+          SHOT_URL: ${{ steps.shot.outputs.url }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- e2e-results -->';
+
+            let rows = '';
+            let counts = { passed: 0, failed: 0, skipped: 0 };
+            try {
+              const report = JSON.parse(fs.readFileSync('src/frontend/results.json', 'utf8'));
+              const walk = (suite) => {
+                for (const spec of suite.specs ?? []) {
+                  const result = spec.tests?.[0]?.results?.[0];
+                  const status = result?.status ?? 'unknown';
+                  counts[status] = (counts[status] ?? 0) + 1;
+                  const icon = status === 'passed' ? '✅' : status === 'skipped' ? '⏭️' : '❌';
+                  rows += `| ${icon} | ${spec.title} | ${result?.duration ?? 0} ms |\n`;
+                }
+                for (const child of suite.suites ?? []) walk(child);
+              };
+              for (const suite of report.suites ?? []) walk(suite);
+            } catch (error) {
+              rows = `| ⚠️ | Could not read the Playwright report: ${error.message} | |\n`;
+            }
+
+            const shot = process.env.SHOT_URL
+              ? `### The app as the suite left it\n\n![Landing page](${process.env.SHOT_URL})\n`
+              : '_Screenshot publishing is skipped for pull requests from forks._\n';
+
+            const body = [
+              marker,
+              '## End-to-end test results',
+              '',
+              `**${counts.passed} passed, ${counts.failed} failed, ${counts.skipped} skipped**`,
+              '',
+              '| | Test | Duration |',
+              '|---|---|---|',
+              rows,
+              shot,
+              `📎 **[Download every test's screenshot, plus traces and the HTML report](${process.env.ARTIFACT_URL})**`
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const existing = (await github.rest.issues.listComments({ owner, repo, issue_number }))
+              .data.find(c => c.body?.startsWith(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Summarise the run
+        if: always()
+        run: |
+          {
+            echo "## End-to-end validation"
+            echo
+            echo "Result: \`${{ job.status }}\`"
+            echo
+            echo "Covered: create a task, mark a task done, delete a task."
+            echo
+            echo "Download the **e2e-evidence** artifact for a screenshot of every"
+            echo "test, plus traces and the full HTML report."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---- Post-deployment smoke test ----
+  # The e2e suite already proved the application's behaviour before merge. What
+  # it could not prove is that the *deployment* works: the managed identity's
+  # SQL grant, the Entra-only database, the App Service cold start. One
+  # authenticated round-trip against the real thing covers exactly that.
+  smoke-test:
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    steps:
+      # Serverless SQL auto-pauses and a fresh App Service cold-starts, so the
+      # first request can take minutes. Failing fast here would just be flaky.
+      - name: Call the deployed API
+        env:
+          API_URL: ${{ needs.deploy.outputs.api-url }}
+        run: |
+          set -uo pipefail
+          principal=$(printf '{"userId":"smoke"}' | base64 -w0)
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "x-ms-client-principal: ${principal}" \
+              "${API_URL}/api/todo" || true)
+            if [ "$code" = "200" ]; then
+              echo "Deployed API responded 200 after ${i} attempt(s)."
+              echo "### Smoke test passed against ${API_URL}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt ${i}: HTTP ${code}, retrying..."
+            sleep 10
+          done
+          echo "::error::Deployed API never returned 200."
+          exit 1
+
+  # ---- Agentic post-deployment review (advisory) ----
+  # Reads the Playwright evidence and probes the live API, then writes a verdict.
+  #
+  # continue-on-error means this job can never fail the run. An agent having a
+  # bad day must not be able to break a build, and an agent having a good day
+  # must not be able to bless one.
+  deployment-review:
+    needs: [deploy, smoke-test]
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download E2E evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-evidence
+          path: evidence
+        continue-on-error: true
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      # `shell(curl:*)` rather than `execute`. The agent may probe HTTP
+      # endpoints and do nothing else. This is the narrowest tool grant in the
+      # lab, and it is narrow precisely because this job runs against live
+      # infrastructure.
+      - name: Agentic deployment validation
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ github.token }}
+          API_URL: ${{ needs.deploy.outputs.api-url }}
+          SMOKE_RESULT: ${{ needs.smoke-test.result }}
+        run: |
+          copilot -p "The application has just been deployed. \
+          The API is at ${API_URL}. The post-deployment smoke test finished with result '${SMOKE_RESULT}'. \
+          The pre-merge end-to-end report and screenshots are under ./evidence/ if present. \
+          Probe the API's health and write a short markdown briefing on the state of this \
+          deployment. State a clear verdict of HEALTHY or DEGRADED, the evidence you based it \
+          on, and anything you could not verify. \
+          Do not create files and do not run any command other than curl." \
+            --allow-tool='read,search,shell(curl:*)' \
+            --no-ask-user > deployment-review.md
+
+      - name: Publish the briefing
+        if: always()
+        run: |
+          {
+            echo "## Agent briefing"
+            echo
+            echo "> Advisory only. This job cannot fail the run."
+            echo
+            cat deployment-review.md 2>/dev/null || echo "_The agent produced no output._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the briefing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-review
+          path: deployment-review.md
+          retention-days: 14
+          if-no-files-found: warn
