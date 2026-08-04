@@ -100,6 +100,26 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
   }
 }
 
+// Linking the API as the Static Web App's backend automatically adds an
+// "Azure Static Web Apps (Linked)" identity provider that rejects any request
+// not proxied through the Static Web App. The API authenticates callers itself
+// (JWT bearer or the x-ms-client-principal header), so App Service must be told
+// to let unauthenticated requests reach the app instead of rejecting them at
+// the platform layer before ClientPrincipalAuthenticationHandler ever runs.
+resource apiAppAuthSettings 'Microsoft.Web/sites/config@2023-01-01' = {
+  parent: apiApp
+  name: 'authsettingsV2'
+  properties: {
+    globalValidation: {
+      requireAuthentication: false
+      unauthenticatedClientAction: 'AllowAnonymous'
+    }
+  }
+  dependsOn: [
+    swaLinkedBackend
+  ]
+}
+
 // Static Web App for Frontend
 resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
   name: staticWebAppName
