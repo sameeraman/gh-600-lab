@@ -72,19 +72,33 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # CodeQL only runs on public repositories. On a private repository it
+      # needs GitHub Code Security, so the scan steps are skipped instead of
+      # failing the job (deploy depends on this job completing).
+      - name: Check repository visibility
+        id: visibility
+        run: echo "public=${{ github.event.repository.private == false }}" >> "$GITHUB_OUTPUT"
+
       # `actions` analyses the workflow files themselves for script injection
       # and untrusted-input issues. On a repo that hands a coding agent write
       # access, the workflows are part of the attack surface.
       - name: Initialize CodeQL
+        if: steps.visibility.outputs.public == 'true'
         uses: github/codeql-action/init@v3
         with:
           languages: csharp, javascript, actions
 
       - name: Build for CodeQL
+        if: steps.visibility.outputs.public == 'true'
         run: dotnet build src/api/TodoApi.csproj
 
       - name: Perform CodeQL Analysis
+        if: steps.visibility.outputs.public == 'true'
         uses: github/codeql-action/analyze@v3
+
+      - name: CodeQL unavailable
+        if: steps.visibility.outputs.public != 'true'
+        run: echo "Skipping CodeQL analysis because this repository is not public."
 
   dependency-review:
     runs-on: ubuntu-latest
