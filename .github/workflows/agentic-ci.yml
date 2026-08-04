@@ -1,3 +1,26 @@
+# ============================================================
+# Agentic CI Pipeline
+#
+# This is the NON-deterministic half of the pipeline. Every job here
+# either invokes an agent or exists to feed one.
+#
+# Why is this a separate file from ci.yml?
+#
+#   ci.yml decides whether the change may merge and ship. Its answers
+#   must be reproducible, so it may only contain deterministic tools.
+#   This file produces advice. Agents are non-deterministic, they cost
+#   money per run, and a bad day for the model must never be able to
+#   block a release. Keeping them apart means the merge gate and the
+#   advice have independent failure modes.
+#
+# Yes, build-and-test appears in both files, and on a pull request it
+# runs twice. That is deliberate. The copy in ci.yml is the merge gate.
+# The copy below exists to produce the .trx and coverage artifacts that
+# the agents read. Sharing one copy across two workflows would mean
+# workflow_run triggers and cross-workflow artifact downloads, which is
+# considerably more machinery than one extra four-minute job is worth.
+# Duplicated compute is the lesser evil; duplicated *authority* is not.
+# ============================================================
 name: Agentic CI Pipeline
 
 on:
@@ -67,7 +90,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        agent: [reviewer]
+        agent: [reviewer, security-scanner]
     steps:
       - uses: actions/checkout@v6
 

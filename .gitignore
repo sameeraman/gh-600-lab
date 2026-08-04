@@ -1,5 +1,11 @@
 node_modules/
 bin/
 obj/
+dist/
 *.trx
 coverage/
+playwright-report/
+test-results/
+src/frontend/results.json
+src/frontend/landing.png
+.DS_Store
