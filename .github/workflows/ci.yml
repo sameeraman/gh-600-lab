@@ -269,6 +269,47 @@ jobs:
           app_location: src/frontend/dist
           output_location: ""
 
+      # Post-deployment guard: proves the deployed API is only reachable through
+      # the Static Web App's authentication front door, and that a caller cannot
+      # impersonate a user by forging the identity header themselves.
+      - name: Verify API authentication boundary
+        env:
+          API_URL: ${{ steps.infra.outputs.apiAppUrl }}
+          API_APP_NAME: ${{ steps.infra.outputs.apiAppName }}
+          RESOURCE_GROUP: ${{ secrets.AZURE_RG }}
+        run: |
+          set -euo pipefail
+
+          # 1. Read the App Service Easy Auth configuration: is auth turned on,
+          #    is authentication required for every request, and is the linked
+          #    Static Web Apps identity provider enabled?
+          read -r enabled required swa_enabled <<< "$(az webapp auth show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$API_APP_NAME" \
+            --query '[platform.enabled, globalValidation.requireAuthentication, identityProviders.azureStaticWebApps.enabled]' \
+            --output tsv)"
+
+          # All three flags must be true; anything else means the API could be
+          # served without the Static Web Apps authentication provider.
+          if [[ "$enabled $required $swa_enabled" != "true true true" ]]; then
+            echo "::error::The API must require the linked Static Web Apps authentication provider."
+            exit 1
+          fi
+
+          # 2. Simulate an attacker calling the API directly (bypassing the SWA
+          #    front door) with a hand-crafted client principal header.
+          principal=$(printf '{"userId":"spoofed-user"}' | base64 -w0)
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "x-ms-client-principal: ${principal}" \
+            "$API_URL/api/todo")
+
+          # The platform must reject the forged identity. Any other status code
+          # (including a 2xx) means the spoofed header was accepted.
+          if [[ ! "$status" =~ ^(400|401|403)$ ]]; then
+            echo "::error::Direct API request with a forged identity returned HTTP ${status:-000}."
+            exit 1
+          fi
+
   # ---- End-to-end tests (merge gate) ----
   # Runs on every pull request, against an API hosted on the runner. No Azure,
   # no secrets, nothing deployed. That is the point: this has to be able to
@@ -476,103 +517,3 @@ jobs:
             echo "Download the **e2e-evidence** artifact for a screenshot of every"
             echo "test, plus traces and the full HTML report."
           } >> "$GITHUB_STEP_SUMMARY"
-
-  # ---- Post-deployment smoke test ----
-  # The e2e suite already proved the application's behaviour before merge. What
-  # it could not prove is that the *deployment* works: the managed identity's
-  # SQL grant, the Entra-only database, the App Service cold start. One
-  # authenticated round-trip against the real thing covers exactly that.
-  smoke-test:
-    needs: [deploy]
-    runs-on: ubuntu-latest
-    steps:
-      # Serverless SQL auto-pauses and a fresh App Service cold-starts, so the
-      # first request can take minutes. Failing fast here would just be flaky.
-      - name: Call the deployed API
-        env:
-          API_URL: ${{ needs.deploy.outputs.api-url }}
-        run: |
-          set -uo pipefail
-          principal=$(printf '{"userId":"smoke"}' | base64 -w0)
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' \
-              -H "x-ms-client-principal: ${principal}" \
-              "${API_URL}/api/todo" || true)
-            if [ "$code" = "200" ]; then
-              echo "Deployed API responded 200 after ${i} attempt(s)."
-              echo "### Smoke test passed against ${API_URL}" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            echo "attempt ${i}: HTTP ${code}, retrying..."
-            sleep 10
-          done
-          echo "::error::Deployed API never returned 200."
-          exit 1
-
-  # ---- Agentic post-deployment review (advisory) ----
-  # Reads the Playwright evidence and probes the live API, then writes a verdict.
-  #
-  # continue-on-error means this job can never fail the run. An agent having a
-  # bad day must not be able to break a build, and an agent having a good day
-  # must not be able to bless one.
-  deployment-review:
-    needs: [deploy, smoke-test]
-    if: always() && needs.deploy.result == 'success'
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Download E2E evidence
-        uses: actions/download-artifact@v4
-        with:
-          name: e2e-evidence
-          path: evidence
-        continue-on-error: true
-
-      - name: Install Copilot CLI
-        run: npm install -g @github/copilot
-
-      # `shell(curl:*)` rather than `execute`. The agent may probe HTTP
-      # endpoints and do nothing else. This is the narrowest tool grant in the
-      # lab, and it is narrow precisely because this job runs against live
-      # infrastructure.
-      - name: Agentic deployment validation
-        env:
-          COPILOT_GITHUB_TOKEN: ${{ github.token }}
-          API_URL: ${{ needs.deploy.outputs.api-url }}
-          SMOKE_RESULT: ${{ needs.smoke-test.result }}
-        run: |
-          copilot -p "The application has just been deployed. \
-          The API is at ${API_URL}. The post-deployment smoke test finished with result '${SMOKE_RESULT}'. \
-          The pre-merge end-to-end report and screenshots are under ./evidence/ if present. \
-          Probe the API's health and write a short markdown briefing on the state of this \
-          deployment. State a clear verdict of HEALTHY or DEGRADED, the evidence you based it \
-          on, and anything you could not verify. \
-          Do not create files and do not run any command other than curl." \
-            --allow-tool='read,search,shell(curl:*)' \
-            --no-ask-user > deployment-review.md
-
-      - name: Publish the briefing
-        if: always()
-        run: |
-          {
-            echo "## Agent briefing"
-            echo
-            echo "> Advisory only. This job cannot fail the run."
-            echo
-            cat deployment-review.md 2>/dev/null || echo "_The agent produced no output._"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the briefing
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: deployment-review
-          path: deployment-review.md
-          retention-days: 14
-          if-no-files-found: warn
