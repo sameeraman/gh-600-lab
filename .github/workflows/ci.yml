@@ -269,6 +269,9 @@ jobs:
           app_location: src/frontend/dist
           output_location: ""
 
+      # Post-deployment guard: proves the deployed API is only reachable through
+      # the Static Web App's authentication front door, and that a caller cannot
+      # impersonate a user by forging the identity header themselves.
       - name: Verify API authentication boundary
         env:
           API_URL: ${{ steps.infra.outputs.apiAppUrl }}
@@ -277,22 +280,31 @@ jobs:
         run: |
           set -euo pipefail
 
+          # 1. Read the App Service Easy Auth configuration: is auth turned on,
+          #    is authentication required for every request, and is the linked
+          #    Static Web Apps identity provider enabled?
           read -r enabled required swa_enabled <<< "$(az webapp auth show \
             --resource-group "$RESOURCE_GROUP" \
             --name "$API_APP_NAME" \
             --query '[platform.enabled, globalValidation.requireAuthentication, identityProviders.azureStaticWebApps.enabled]' \
             --output tsv)"
 
+          # All three flags must be true; anything else means the API could be
+          # served without the Static Web Apps authentication provider.
           if [[ "$enabled $required $swa_enabled" != "true true true" ]]; then
             echo "::error::The API must require the linked Static Web Apps authentication provider."
             exit 1
           fi
 
+          # 2. Simulate an attacker calling the API directly (bypassing the SWA
+          #    front door) with a hand-crafted client principal header.
           principal=$(printf '{"userId":"spoofed-user"}' | base64 -w0)
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             --header "x-ms-client-principal: ${principal}" \
             "$API_URL/api/todo")
 
+          # The platform must reject the forged identity. Any other status code
+          # (including a 2xx) means the spoofed header was accepted.
           if [[ ! "$status" =~ ^(400|401|403)$ ]]; then
             echo "::error::Direct API request with a forged identity returned HTTP ${status:-000}."
             exit 1
