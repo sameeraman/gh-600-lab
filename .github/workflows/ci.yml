@@ -269,6 +269,35 @@ jobs:
           app_location: src/frontend/dist
           output_location: ""
 
+      - name: Verify API authentication boundary
+        env:
+          API_URL: ${{ steps.infra.outputs.apiAppUrl }}
+          API_APP_NAME: ${{ steps.infra.outputs.apiAppName }}
+          RESOURCE_GROUP: ${{ secrets.AZURE_RG }}
+        run: |
+          set -euo pipefail
+
+          read -r enabled required swa_enabled <<< "$(az webapp auth show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$API_APP_NAME" \
+            --query '[platform.enabled, globalValidation.requireAuthentication, identityProviders.azureStaticWebApps.enabled]' \
+            --output tsv)"
+
+          if [[ "$enabled $required $swa_enabled" != "true true true" ]]; then
+            echo "::error::The API must require the linked Static Web Apps authentication provider."
+            exit 1
+          fi
+
+          principal=$(printf '{"userId":"spoofed-user"}' | base64 -w0)
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "x-ms-client-principal: ${principal}" \
+            "$API_URL/api/todo")
+
+          if [[ ! "$status" =~ ^(400|401|403)$ ]]; then
+            echo "::error::Direct API request with a forged identity returned HTTP ${status:-000}."
+            exit 1
+          fi
+
   # ---- End-to-end tests (merge gate) ----
   # Runs on every pull request, against an API hosted on the runner. No Azure,
   # no secrets, nothing deployed. That is the point: this has to be able to
