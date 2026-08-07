@@ -176,12 +176,10 @@ resource sqlDb 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
   }
 }
 
-resource sqlFirewallAzure 'Microsoft.Sql/servers/firewallRules@2023-05-01-preview' = {
-  parent: sqlServer
-  name: 'AllowAllWindowsAzureIps'
-  properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '0.0.0.0'
+module sqlFirewallRules 'sql-firewall-rules.bicep' = {
+  params: {
+    sqlServerName: sqlServer.name
+    apiOutboundIpAddresses: split(apiApp.properties.possibleOutboundIpAddresses, ',')
   }
 }
 
