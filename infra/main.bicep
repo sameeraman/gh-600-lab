@@ -100,6 +100,28 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
   }
 }
 
+resource apiAuth 'Microsoft.Web/sites/config@2023-12-01' = {
+  parent: apiApp
+  name: 'authsettingsV2'
+  properties: {
+    platform: {
+      enabled: true
+    }
+    globalValidation: {
+      requireAuthentication: true
+      unauthenticatedClientAction: 'Return401'
+    }
+    httpSettings: {
+      requireHttps: true
+    }
+    identityProviders: {
+      azureStaticWebApps: {
+        enabled: true
+      }
+    }
+  }
+}
+
 // Static Web App for Frontend
 resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
   name: staticWebAppName
@@ -170,6 +192,9 @@ resource swaLinkedBackend 'Microsoft.Web/staticSites/linkedBackends@2023-01-01' 
     backendResourceId: apiApp.id
     region: location
   }
+  dependsOn: [
+    apiAuth
+  ]
 }
 
 // Outputs for CI/CD pipeline
@@ -180,4 +205,5 @@ output apiIdentityClientId string = apiIdentity.properties.clientId
 output sqlServerName string = sqlServer.name
 output sqlDatabaseName string = sqlDbName
 output staticWebAppName string = staticWebApp.name
+output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
 output resourceGroupName string = resourceGroup().name

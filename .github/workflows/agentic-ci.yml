@@ -134,21 +134,42 @@ jobs:
       - name: Start API
         env:
           ASPNETCORE_ENVIRONMENT: Development
-          ASPNETCORE_URLS: http://localhost:5000
           Authentication__RequireSignedTokens: 'false'
         run: |
-          principal_header=$(python - <<'PY'
-          import base64, json
-          print(base64.b64encode(json.dumps({"userId": "local-dev-user"}).encode()).decode())
-          PY
-          )
-          dotnet run --project src/api/TodoApi.csproj > /tmp/todo-api.log 2>&1 &
-          for attempt in {1..30}; do
-            if curl --silent --fail -H "x-ms-client-principal: $principal_header" http://localhost:5000/api/todo > /dev/null; then
+          set -uo pipefail
+
+          dotnet run \
+            --project src/api/TodoApi.csproj \
+            --configuration Release \
+            --urls http://127.0.0.1:5000 \
+            > /tmp/todo-api.log 2>&1 &
+
+          api_pid=$!
+          principal=$(printf '{"userId":"warmup"}' | base64 -w0)
+
+          for i in $(seq 1 60); do
+            if ! kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::API process exited before becoming ready."
+              cat /tmp/todo-api.log
+              exit 1
+            fi
+
+            code=$(curl --silent \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --header "x-ms-client-principal: ${principal}" \
+              http://127.0.0.1:5000/api/todo || true)
+
+            if [ "$code" = "200" ]; then
+              echo "API ready after ${i}s."
               exit 0
             fi
+
+            echo "API readiness attempt ${i} returned HTTP ${code}."
             sleep 1
           done
+
+          echo "::error::API failed to start."
           cat /tmp/todo-api.log
           exit 1
 

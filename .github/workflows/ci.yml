@@ -144,9 +144,10 @@ jobs:
       contents: read
     environment:
       name: production
-      url: ${{ steps.infra.outputs.apiAppUrl }}
+      url: ${{ steps.infra.outputs.staticWebAppUrl }}
     outputs:
       api-url: ${{ steps.infra.outputs.apiAppUrl }}
+      frontend-url: ${{ steps.infra.outputs.staticWebAppUrl }}
     steps:
       - uses: actions/checkout@v6
 
