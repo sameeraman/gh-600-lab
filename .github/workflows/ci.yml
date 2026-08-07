@@ -144,9 +144,10 @@ jobs:
       contents: read
     environment:
       name: production
-      url: ${{ steps.infra.outputs.apiAppUrl }}
+      url: ${{ steps.infra.outputs.staticWebAppUrl }}
     outputs:
       api-url: ${{ steps.infra.outputs.apiAppUrl }}
+      frontend-url: ${{ steps.infra.outputs.staticWebAppUrl }}
     steps:
       - uses: actions/checkout@v6
 
@@ -283,12 +284,11 @@ jobs:
           # 1. Read the App Service Easy Auth configuration: is auth turned on,
           #    is authentication required for every request, and is the linked
           #    Static Web Apps identity provider enabled?
-          SUB=$(az account show --query id -o tsv)
-          read -r enabled required swa_enabled <<< "$(az resource show \
-            --ids "/subscriptions/${SUB}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Web/sites/${API_APP_NAME}/config/authsettingsV2" \
-            --api-version 2023-12-01 \
-            --query '[properties.platform.enabled, properties.globalValidation.requireAuthentication, properties.identityProviders.azureStaticWebApps.enabled]' \
-            --output tsv | paste -s -)"
+          read -r enabled required swa_enabled <<< "$(az webapp auth show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$API_APP_NAME" \
+            --query '[platform.enabled, globalValidation.requireAuthentication, identityProviders.azureStaticWebApps.enabled]' \
+            --output tsv)"
 
           # All three flags must be true; anything else means the API could be
           # served without the Static Web Apps authentication provider.

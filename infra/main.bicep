@@ -180,4 +180,5 @@ output apiIdentityClientId string = apiIdentity.properties.clientId
 output sqlServerName string = sqlServer.name
 output sqlDatabaseName string = sqlDbName
 output staticWebAppName string = staticWebApp.name
+output staticWebAppUrl string = 'https://${staticWebApp.properties.defaultHostname}'
 output resourceGroupName string = resourceGroup().name
