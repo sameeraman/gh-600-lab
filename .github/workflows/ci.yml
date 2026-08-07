@@ -358,7 +358,7 @@ jobs:
             echo "test, plus traces and the full HTML report."
           } >> "$GITHUB_STEP_SUMMARY"
 
-agent-review:
+  agent-review:
     needs: [build-and-test]
     runs-on: ubuntu-latest
     strategy:
@@ -393,7 +393,7 @@ agent-review:
 
 
   consolidate:
-    needs: [dependency-review, agent-review, security-scan, e2e-tests]
+    needs: [dependency-review, agent-review, security-scan, e2e-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -452,7 +452,7 @@ agent-review:
   # required-reviewer rule, so this job waits for a human before it touches
   # Azure. See lab-preparation.md.
   deploy:
-    needs: [build-and-test, security-scan, dependency-review, e2e-tests, consolidate]
+    needs: [build-and-test, security-scan, dependency-review, e2e-test, consolidate]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
