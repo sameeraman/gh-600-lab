@@ -25,17 +25,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  security-events: write
-  pull-requests: write
-  copilot-requests: write
-  actions: read
-  models: read
+permissions: {}
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
 
@@ -80,6 +76,9 @@ jobs:
   security-scan:
     needs: [build-and-test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v6
 
@@ -120,6 +119,8 @@ jobs:
   dependency-review:
     needs: [build-and-test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - name: Check dependency review support
@@ -361,6 +362,9 @@ jobs:
   agent-review:
     needs: [build-and-test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      copilot-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -395,9 +399,10 @@ jobs:
   consolidate:
     needs: [dependency-review, agent-review, security-scan, e2e-test]
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      copilot-requests: write
     steps:
-      - uses: actions/checkout@v6
-
       - name: Download All Reports
         uses: actions/download-artifact@v4.1.3
         with:
@@ -425,8 +430,37 @@ jobs:
             --stream=off \
             --no-ask-user > reports/executive-summary.md
 
+      - name: Upload Consolidated Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: executive-summary
+          path: reports/executive-summary.md
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Write Step Summary
+        run: |
+          {
+            echo "## 🤖 Agentic CI Consolidated Report"
+            echo ""
+            cat reports/executive-summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-summary:
+    needs: [consolidate]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Download Consolidated Summary
+        uses: actions/download-artifact@v4.1.3
+        with:
+          name: executive-summary
+          path: reports/
+
       - name: Post Summary to PR
-        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -438,14 +472,6 @@ jobs:
               issue_number: context.issue.number,
               body: `## 🤖 Agentic CI Summary\n\n${summary}`
             });
-
-      - name: Write Step Summary
-        run: |
-          {
-            echo "## 🤖 Agentic CI Consolidated Report"
-            echo ""
-            cat reports/executive-summary.md
-          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---- Deploy ----
   # `environment: production` is the approval gate. That environment carries a
