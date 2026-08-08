@@ -523,6 +523,8 @@ jobs:
           parameters-file: infra/parameters.json
           parameters: |
             authenticationClientId: ${{ secrets.AZURE_AUTH_CLIENT_ID }}
+            sqlAdminObjectId: ${{ vars.AZURE_SQL_ADMIN_OBJECT_ID }}
+            sqlAdminLogin: ${{ vars.AZURE_SQL_ADMIN_LOGIN }}
 
       # The API connects to SQL as its managed identity, which can only
       # authenticate once it exists as a contained user inside the database.

@@ -10,12 +10,6 @@
     },
     "sqlLocation": {
       "value": "westus3"
-    },
-    "sqlAdminObjectId": {
-      "value": "84b39324-0e32-4d8d-805c-965e98736387"
-    },
-    "sqlAdminLogin": {
-      "value": "gh600-lab-deploy"
     }
   }
 }
